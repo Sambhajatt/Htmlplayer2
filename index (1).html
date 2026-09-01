@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HTML Player</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        #game-area {
+            width: 100%;
+            height: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            background: #000;
+        }
+
+        #manager {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0f0f0f;
+            color: #eee;
+            z-index: 9999;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        #manager.active { display: block; }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 16px;
+        }
+        .header h1 { font-size: 22px; font-weight: 700; }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        button:hover { background: #1d4ed8; }
+        button.danger { background: #dc2626; }
+        button.danger:hover { background: #b91c1c; }
+        button.secondary { background: #374151; }
+        button.secondary:hover { background: #4b5563; }
+        button.success { background: #16a34a; }
+        button.success:hover { background: #15803d; }
+
+        .game-list {
+            display: grid;
+            gap: 12px;
+            margin-bottom: 28px;
+        }
+        .game-item {
+            background: #1a1a1a;
+            padding: 14px 16px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #2a2a2a;
+        }
+        .game-item .name {
+            font-weight: 600;
+            font-size: 15px;
+        }
+        .game-item .actions { display: flex; gap: 8px; }
+
+        .add-section {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #2a2a2a;
+            margin-bottom: 20px;
+        }
+        .add-section h2 {
+            margin-bottom: 16px;
+            font-size: 17px;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            background: #111;
+            border: 1px solid #333;
+            color: #eee;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        textarea {
+            height: 160px;
+            resize: vertical;
+            font-family: monospace;
+        }
+
+        .upload-box {
+            border: 2px dashed #444;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 16px;
+            background: #111;
+        }
+        .upload-box p {
+            color: #aaa;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .hint {
+            margin-top: 20px;
+            color: #888;
+            font-size: 13px;
+            line-height: 1.6;
+            background: #1a1a1a;
+            padding: 14px;
+            border-radius: 8px;
+        }
+        .hint b { color: #ccc; }
+    </style>
+</head>
+<body>
+
+    <div id="game-area"></div>
+
+    <div id="manager">
+        <div class="header">
+            <h1>HTML Player</h1>
+            <button class="secondary" onclick="closeManager()">Close</button>
+        </div>
+
+        <div class="game-list" id="gameList"></div>
+
+        <!-- Upload Section -->
+        <div class="add-section">
+            <h2>Upload HTML File</h2>
+            <div class="upload-box">
+                <p>File Manager se .html file choose karo</p>
+                <input type="file" id="fileInput" accept=".html,.htm" style="display:none" onchange="handleFileUpload(event)">
+                <button class="success" onclick="document.getElementById('fileInput').click()">Choose HTML File</button>
+            </div>
+        </div>
+
+        <!-- Manual Paste Section -->
+        <div class="add-section">
+            <h2>Ya Manual Paste Karo</h2>
+            <input type="text" id="gameName" placeholder="Game ka naam">
+            <textarea id="gameCode" placeholder="Yahan poora HTML code paste karo..."></textarea>
+            <button onclick="saveGame()">Save & Play</button>
+        </div>
+
+        <div class="hint">
+            • <b>Ctrl + Shift + M</b> → Manager kholo / band karo<br>
+            • Upload ki hui file automatically save + full screen play ho jayegi<br>
+            • Data LocalStorage mein rehta hai (browser data clear karne tak)<br>
+            • Koi floating button / side slider nahi hai
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_KEY = 'html_player_games_v2';
+        const CURRENT_KEY = 'html_player_current_v2';
+
+        function getGames() {
+            try {
+                return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+            } catch {
+                return [];
+            }
+        }
+
+        function saveGames(games) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(games));
+        }
+
+        function getCurrentId() {
+            return localStorage.getItem(CURRENT_KEY);
+        }
+
+        function setCurrentId(id) {
+            localStorage.setItem(CURRENT_KEY, id);
+        }
+
+        function renderList() {
+            const list = document.getElementById('gameList');
+            const games = getGames();
+            const current = getCurrentId();
+
+            if (games.length === 0) {
+                list.innerHTML = '<p style="color:#666; padding:10px 0;">Abhi koi game save nahi hai.</p>';
+                return;
+            }
+
+            list.innerHTML = games.map(g => `
+                <div class="game-item">
+                    <div class="name">
+                        ${escapeHtml(g.name)}
+                        ${g.id === current ? '<span style="color:#22c55e; font-size:12px; margin-left:8px;">● Playing</span>' : ''}
+                    </div>
+                    <div class="actions">
+                        <button onclick="playGame('${g.id}')">Play</button>
+                        <button class="danger" onclick="deleteGame('${g.id}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function openManager() {
+            document.getElementById('manager').classList.add('active');
+            renderList();
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(() => {});
+            }
+        }
+
+        function closeManager() {
+            document.getElementById('manager').classList.remove('active');
+            const current = getCurrentId();
+            if (current) {
+                loadAndPlay(current);
+            }
+        }
+
+        // ===== File Upload =====
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!file.name.match(/\.(html|htm)$/i)) {
+                alert('Sirf .html ya .htm file allowed hai');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const code = e.target.result;
+                const name = file.name.replace(/\.(html|htm)$/i, '');
+
+                const games = getGames();
+                const id = 'g_' + Date.now();
+
+                games.push({ id, name, code });
+                saveGames(games);
+                setCurrentId(id);
+
+                // Reset file input
+                event.target.value = '';
+
+                closeManager();
+                loadAndPlay(id);
+            };
+            reader.onerror = function() {
+                alert('File read nahi ho payi');
+            };
+            reader.readAsText(file);
+        }
+
+        // ===== Manual Save =====
+        function saveGame() {
+            const name = document.getElementById('gameName').value.trim();
+            const code = document.getElementById('gameCode').value.trim();
+
+            if (!name || !code) {
+                alert('Naam aur HTML code dono zaroori hain');
+                return;
+            }
+
+            const games = getGames();
+            const id = 'g_' + Date.now();
+            games.push({ id, name, code });
+            saveGames(games);
+            setCurrentId(id);
+
+            document.getElementById('gameName').value = '';
+            document.getElementById('gameCode').value = '';
+
+            closeManager();
+            loadAndPlay(id);
+        }
+
+        function playGame(id) {
+            setCurrentId(id);
+            closeManager();
+            loadAndPlay(id);
+        }
+
+        function deleteGame(id) {
+            if (!confirm('Is game ko delete karna hai?')) return;
+
+            let games = getGames().filter(g => g.id !== id);
+            saveGames(games);
+
+            if (getCurrentId() === id) {
+                localStorage.removeItem(CURRENT_KEY);
+                document.getElementById('game-area').innerHTML = '';
+            }
+            renderList();
+        }
+
+        function loadAndPlay(id) {
+            const games = getGames();
+            const game = games.find(g => g.id === id);
+            if (!game) return;
+
+            const area = document.getElementById('game-area');
+            area.innerHTML = ''; // clear pehle
+
+            // HTML inject
+            area.innerHTML = game.code;
+
+            // Scripts ko re-execute karo (important)
+            const scripts = area.querySelectorAll('script');
+            scripts.forEach(oldScript => {
+                const newScript = document.createElement('script');
+                Array.from(oldScript.attributes).forEach(attr => {
+                    newScript.setAttribute(attr.name, attr.value);
+                });
+                newScript.textContent = oldScript.textContent;
+                oldScript.parentNode.replaceChild(newScript, oldScript);
+            });
+
+            goFullscreen();
+        }
+
+        function goFullscreen() {
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen().catch(() => {});
+            } else if (elem.webkitRequestFullscreen) {
+                elem.webkitRequestFullscreen();
+            } else if (elem.msRequestFullscreen) {
+                elem.msRequestFullscreen();
+            }
+        }
+
+        // Keyboard shortcut
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'm') {
+                e.preventDefault();
+                const manager = document.getElementById('manager');
+                if (manager.classList.contains('active')) {
+                    closeManager();
+                } else {
+                    openManager();
+                }
+            }
+        });
+
+        // On page load
+        window.addEventListener('load', () => {
+            const current = getCurrentId();
+            const games = getGames();
+
+            if (current && games.find(g => g.id === current)) {
+                loadAndPlay(current);
+            } else if (games.length > 0) {
+                setCurrentId(games[0].id);
+                loadAndPlay(games[0].id);
+            } else {
+                openManager();
+            }
+        });
+
+        // Fullscreen exit pe wapas force (manager band ho tab)
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement && 
+                !document.getElementById('manager').classList.contains('active')) {
+                setTimeout(goFullscreen, 400);
+            }
+        });
+    </script>
+</body>
+</html>
