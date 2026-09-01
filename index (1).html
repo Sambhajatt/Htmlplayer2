@@ -24,6 +24,26 @@
             background: #000;
         }
 
+        /* ===== Hidden Back Button ===== */
+        #hidden-back {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 48px;
+            height: 48px;
+            z-index: 9998;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            opacity: 0.01;          /* almost invisible */
+            transition: opacity 0.2s;
+        }
+        #hidden-back:hover,
+        #hidden-back:active {
+            opacity: 0.25;          /* slight visibility on touch/hover */
+            background: rgba(255,255,255,0.15);
+        }
+
         #manager {
             display: none;
             position: fixed;
@@ -66,6 +86,8 @@
         button.secondary:hover { background: #4b5563; }
         button.success { background: #16a34a; }
         button.success:hover { background: #15803d; }
+        button.warning { background: #d97706; }
+        button.warning:hover { background: #b45309; }
 
         .game-list {
             display: grid;
@@ -85,7 +107,7 @@
             font-weight: 600;
             font-size: 15px;
         }
-        .game-item .actions { display: flex; gap: 8px; }
+        .game-item .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
         .add-section {
             background: #1a1a1a;
@@ -138,15 +160,30 @@
             border-radius: 8px;
         }
         .hint b { color: #ccc; }
+
+        .edit-mode-badge {
+            display: none;
+            background: #d97706;
+            color: white;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            margin-left: 10px;
+            font-weight: 600;
+        }
+        .edit-mode-badge.show { display: inline-block; }
     </style>
 </head>
 <body>
 
     <div id="game-area"></div>
 
+    <!-- Hidden Back Button (top-left corner, almost invisible) -->
+    <button id="hidden-back" title="Open Manager" onclick="openManager()"></button>
+
     <div id="manager">
         <div class="header">
-            <h1>HTML Player</h1>
+            <h1>HTML Player <span id="editBadge" class="edit-mode-badge">EDIT MODE</span></h1>
             <button class="secondary" onclick="closeManager()">Close</button>
         </div>
 
@@ -162,17 +199,22 @@
             </div>
         </div>
 
-        <!-- Manual Paste Section -->
+        <!-- Manual Paste / Edit Section -->
         <div class="add-section">
-            <h2>Ya Manual Paste Karo</h2>
+            <h2 id="formTitle">Ya Manual Paste Karo</h2>
             <input type="text" id="gameName" placeholder="Game ka naam">
             <textarea id="gameCode" placeholder="Yahan poora HTML code paste karo..."></textarea>
-            <button onclick="saveGame()">Save & Play</button>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button id="saveBtn" onclick="saveGame()">Save & Play</button>
+                <button id="cancelEditBtn" class="secondary" style="display:none;" onclick="cancelEdit()">Cancel Edit</button>
+            </div>
         </div>
 
         <div class="hint">
             • <b>Ctrl + Shift + M</b> → Manager kholo / band karo<br>
+            • <b>Top-left corner</b> pe almost invisible button → Manager open<br>
             • Upload ki hui file automatically save + full screen play ho jayegi<br>
+            • <b>Edit</b> button se existing game ka HTML update kar sakte ho (data lose nahi hota)<br>
             • Data LocalStorage mein rehta hai (browser data clear karne tak)<br>
             • Koi floating button / side slider nahi hai
         </div>
@@ -181,6 +223,8 @@
     <script>
         const STORAGE_KEY = 'html_player_games_v2';
         const CURRENT_KEY = 'html_player_current_v2';
+
+        let editingId = null;   // null = new game, otherwise update existing
 
         function getGames() {
             try {
@@ -220,6 +264,7 @@
                     </div>
                     <div class="actions">
                         <button onclick="playGame('${g.id}')">Play</button>
+                        <button class="warning" onclick="editGame('${g.id}')">Edit</button>
                         <button class="danger" onclick="deleteGame('${g.id}')">Delete</button>
                     </div>
                 </div>
@@ -282,7 +327,38 @@
             reader.readAsText(file);
         }
 
-        // ===== Manual Save =====
+        // ===== Edit existing game (no data loss) =====
+        function editGame(id) {
+            const games = getGames();
+            const game = games.find(g => g.id === id);
+            if (!game) return;
+
+            editingId = id;
+            document.getElementById('gameName').value = game.name;
+            document.getElementById('gameCode').value = game.code;
+
+            document.getElementById('formTitle').textContent = 'Edit Game (Update)';
+            document.getElementById('saveBtn').textContent = 'Update & Play';
+            document.getElementById('saveBtn').className = 'warning';
+            document.getElementById('cancelEditBtn').style.display = 'inline-block';
+            document.getElementById('editBadge').classList.add('show');
+
+            // scroll to form
+            document.getElementById('gameName').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function cancelEdit() {
+            editingId = null;
+            document.getElementById('gameName').value = '';
+            document.getElementById('gameCode').value = '';
+            document.getElementById('formTitle').textContent = 'Ya Manual Paste Karo';
+            document.getElementById('saveBtn').textContent = 'Save & Play';
+            document.getElementById('saveBtn').className = '';
+            document.getElementById('cancelEditBtn').style.display = 'none';
+            document.getElementById('editBadge').classList.remove('show');
+        }
+
+        // ===== Save (new) or Update (existing) =====
         function saveGame() {
             const name = document.getElementById('gameName').value.trim();
             const code = document.getElementById('gameCode').value.trim();
@@ -292,7 +368,24 @@
                 return;
             }
 
-            const games = getGames();
+            let games = getGames();
+
+            if (editingId) {
+                // UPDATE existing – ID same rahega, data lose nahi hoga
+                const idx = games.findIndex(g => g.id === editingId);
+                if (idx !== -1) {
+                    games[idx].name = name;
+                    games[idx].code = code;
+                    saveGames(games);
+                    setCurrentId(editingId);
+                    cancelEdit();
+                    closeManager();
+                    loadAndPlay(editingId);
+                    return;
+                }
+            }
+
+            // NEW game
             const id = 'g_' + Date.now();
             games.push({ id, name, code });
             saveGames(games);
@@ -321,6 +414,12 @@
                 localStorage.removeItem(CURRENT_KEY);
                 document.getElementById('game-area').innerHTML = '';
             }
+
+            // if we were editing this one, cancel edit
+            if (editingId === id) {
+                cancelEdit();
+            }
+
             renderList();
         }
 
